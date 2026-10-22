@@ -1,0 +1,11 @@
+{
+  "id": "inspector",
+  "name": "Inspector",
+  "description": "For modders: shows the game's states, objects and server messages live, to see what a mod can build on.",
+  "version": "0.1.0",
+  "author": "Tutez",
+  "api": "1.0",
+  "drh": "14",
+  "entry": "Main",
+  "uses": ["extends"]
+}
