@@ -13,14 +13,26 @@ import openfl.events.Event;
 /**
  * An `extends` mod: it shows the game itself, which the `api` keeps behind stable readings, so a
  * modder sees what is there to build on. The core's generic events (`context.core`) report every object,
- * state and server field; the game's own event bus reports the actor under the cursor. F8 shows or
- * hides the panel.
+ * state and server field; the game's own event bus reports the actor under the cursor, whose fields it
+ * reads by reflection. Every actor has the same fields, hero or prop, so the panel shows first those
+ * that changed while hovered, then its public ones; F10 writes it to the mod's `data` folder with every
+ * field. F8 shows or hides the panel, F9 freezes it.
  */
 class Main extends Mod {
 	static inline final F8 = 119;
 
+	static inline final F9 = 120;
+
+	static inline final F10 = 121;
+
 	/** How many lines each list keeps. */
 	static inline final KEPT = 8;
+
+	/** At most how many of the hovered actor's fields the panel shows; a written snapshot has them all. */
+	static inline final SHOWN_FIELDS = 16;
+
+	/** Frames between two readings of the hovered actor's fields, which call its getters. */
+	static inline final READ_EVERY = 15;
 
 	var context:Context;
 
@@ -36,12 +48,28 @@ class Main extends Mod {
 
 	var arrivals:Array<String> = [];
 
-	/** Times each object class received each field, most recent first. */
+	/** Times each field was received, by its name. */
 	var fields:Map<String, Int> = new Map();
 
 	var recentFields:Array<String> = [];
 
 	var hovered:Null<ActorGameObject>;
+
+	/** The hovered actor's fields, as last read: changed ones first, then public ones, then internal ones. */
+	var hoveredFields:Array<String> = [];
+
+	/** How many of them the panel shows: changed and public ones. */
+	var hoveredShown:Int = 0;
+
+	/** Each field's value when the actor was first read, to tell those that change. */
+	var baseline:Map<String, String> = new Map();
+
+	var frames:Int = 0;
+
+	var frozen:Bool = false;
+
+	/** What the panel shows, and the hovered actor's fields in full, for F10. */
+	var shown:Array<String> = [];
 
 	var listening:Bool = false;
 
@@ -52,9 +80,16 @@ class Main extends Mod {
 		// Redrawn on the panel's own frames: they stop with the overlay layer if the mod fails.
 		panel.addEventListener(Event.ENTER_FRAME, refresh);
 		context.onKeyDown(function(key) {
-			if (key != F8)
-				return false;
-			panel.visible = !panel.visible;
+			switch (key) {
+				case F8:
+					panel.visible = !panel.visible;
+				case F9:
+					frozen = !frozen;
+				case F10:
+					write();
+				default:
+					return false;
+			}
 			return true;
 		});
 		var core = context.core;
@@ -68,8 +103,8 @@ class Main extends Mod {
 			if (object == hovered)
 				hovered = null;
 		});
-		core.onFieldReceived(function(object, field) {
-			var key = nameOf(object) + " field " + field;
+		core.onFieldReceived(function(object, field, name) {
+			var key = name != "" ? name : nameOf(object) + " field " + field;
 			count(fields, key, 1);
 			remember(recentFields, key);
 		});
@@ -101,6 +136,10 @@ class Main extends Mod {
 
 	function hover(event:DBMouseEvent):Void {
 		hovered = event.actor;
+		hoveredFields = [];
+		hoveredShown = 0;
+		baseline = new Map();
+		frames = 0;
 	}
 
 	function leave(event:DBMouseEvent):Void {
@@ -109,17 +148,28 @@ class Main extends Mod {
 	}
 
 	function refresh(_):Void {
-		if (!panel.visible || !context.core.alive)
+		if (!panel.visible || frozen || !context.core.alive)
 			return;
-		var lines = ["INSPECTOR (F8)", "", "States:"];
+		var actor = hovered != null && !hovered.isDestroyed ? hovered : null;
+		if (actor != null && frames++ % READ_EVERY == 0)
+			read(actor);
+
+		var lines = ["INSPECTOR   F8 hide, F9 freeze, F10 write", "", "States:"];
 		for (machine in sorted(states.keys()))
 			lines.push("  " + machine + ": " + states.get(machine));
 		lines.push("  actors: " + actorStateChanges + " changes");
 		lines.push("");
 		lines.push("Under the cursor:");
-		var actor = hovered;
-		lines.push(actor == null || actor.isDestroyed ? "  nothing" : "  " + label(actor) + ", hp " + actor.hitPoints + "/"
-			+ Math.round(actor.maxHitPoints) + ", " + (actor.stateMachine == null ? "" : actor.stateMachine.currentStateName));
+		if (actor == null) {
+			lines.push("  nothing");
+		} else {
+			lines.push("  " + label(actor) + "   * changed");
+			var shownHere = Std.int(Math.min(SHOWN_FIELDS, hoveredShown));
+			for (i in 0...shownHere)
+				lines.push("    " + hoveredFields[i]);
+			if (hoveredFields.length > shownHere)
+				lines.push("    … " + (hoveredFields.length - shownHere) + " more with F10");
+		}
 		lines.push("");
 		lines.push("Objects ready:");
 		for (name in sorted(objects.keys()))
@@ -133,6 +183,90 @@ class Main extends Mod {
 		for (key in recentFields)
 			lines.push("  " + key + " (" + fields.get(key) + ")");
 		panel.show(lines, context.viewWidth);
+
+		shown = lines.copy();
+		if (actor != null && hoveredFields.length > Math.min(SHOWN_FIELDS, hoveredShown)) {
+			shown.push("");
+			shown.push(label(actor) + ", every field:");
+			for (line in hoveredFields)
+				shown.push("  " + line);
+		}
+	}
+
+	/** What the panel shows, in a new file of the mod's `data` folder. */
+	function write():Void {
+		var stamp = DateTools.format(Date.now(), "%Y%m%d-%H%M%S");
+		var path = context.data + "/inspector-" + stamp + ".txt";
+		try {
+			sys.io.File.saveContent(path, shown.join("\n") + "\n");
+			context.log("wrote " + path);
+		} catch (e:Dynamic) {
+			context.log("could not write " + path + ": " + Std.string(e));
+		}
+	}
+
+	/**
+	 * Reads the actor's fields and properties: those that changed since it was first hovered, marked,
+	 * then its public ones, then its internal ones (`mName`, the game's private storage), each by name.
+	 */
+	function read(actor:ActorGameObject):Void {
+		var changed = [];
+		var open = [];
+		var internal = [];
+		var first = !baseline.keys().hasNext();
+		for (field in readable(actor)) {
+			if (first)
+				baseline.set(field.name, field.value);
+			var line = field.name + " = " + field.value;
+			if (baseline.get(field.name) != field.value)
+				changed.push("* " + line);
+			else if (internalName(field.name))
+				internal.push(line);
+			else
+				open.push(line);
+		}
+		hoveredFields = changed.concat(open).concat(internal);
+		hoveredShown = changed.length + open.length;
+	}
+
+	/** The game's private storage, by its AS3 naming: `m` then a capital. */
+	static function internalName(name:String):Bool {
+		return name.length > 1 && name.charAt(0) == "m" && name.charAt(1) == name.charAt(1).toUpperCase()
+			&& name.charAt(1) != name.charAt(1).toLowerCase();
+	}
+
+	/**
+	 * The object's fields and properties with their values, by name. A property is read through its
+	 * getter; a getter that throws is left out.
+	 */
+	static function readable(object:Dynamic):Array<{name:String, value:String}> {
+		var names = Type.getInstanceFields(Type.getClass(object));
+		var fields = [];
+		for (name in sorted(names.iterator())) {
+			var property = StringTools.startsWith(name, "get_") ? name.substr(4) : null;
+			// A property's storage is shown through its getter.
+			if (property == null && names.indexOf("get_" + name) >= 0)
+				continue;
+			try {
+				var value:Dynamic = property != null ? Reflect.getProperty(object, property) : Reflect.field(object, name);
+				if (!Reflect.isFunction(value))
+					fields.push({name: property != null ? property : name, value: describe(value)});
+			} catch (_:Dynamic) {}
+		}
+		return fields;
+	}
+
+	static function describe(value:Dynamic):String {
+		if (value == null)
+			return "null";
+		if (Std.isOfType(value, GameObject))
+			return label(value);
+		if (Std.isOfType(value, String) || Std.isOfType(value, Float) || Std.isOfType(value, Bool)) {
+			var text = Std.string(value);
+			return text.length > 48 ? text.substr(0, 47) + "…" : text;
+		}
+		var type = Type.getClass(value);
+		return type == null ? Std.string(Type.typeof(value)) : nameOf(value);
 	}
 
 	static function count(counts:Map<String, Int>, key:String, by:Int):Void {
