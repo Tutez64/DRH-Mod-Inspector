@@ -1,7 +1,7 @@
 {
   "id": "inspector",
   "name": "Inspector",
-  "description": "For modders: shows the game's states, objects, server fields and actor data live, to see what a mod can build on.",
+  "description": "Shows the game's raw values as it runs: the last monster or prop hovered, game states, objects and server messages.",
   "version": "0.1.0",
   "author": "Tutez",
   "api": "1.0",

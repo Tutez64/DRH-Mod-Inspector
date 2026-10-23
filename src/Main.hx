@@ -14,10 +14,10 @@ import openfl.events.Event;
  * An `extends` mod: it shows the game itself, which the `api` keeps behind stable readings, so a
  * modder sees what is there to build on. The core's generic events (`context.core`) report every object,
  * state and server field; the game's own event bus reports the actor under the cursor, whose fields it
- * reads by reflection. The last actor hovered stays watched until another is, and F7 pins it. Every
- * actor has the same fields, hero or prop, so the panel shows first those that changed since it was
- * first watched, then its public ones; F10 writes it to the mod's `data` folder with every field. F8
- * shows or hides the panel, F9 freezes it.
+ * reads by reflection. The last actor hovered stays watched until another is, and F9 pins it. Every
+ * actor has the same fields, monster or prop, so the panel shows first those that changed since it was
+ * first watched, then its public ones; F10 writes it to the mod's `data` folder with every field. F7
+ * shows or hides the panel, F8 freezes it.
  */
 class Main extends Mod {
 	static inline final F7 = 118;
@@ -88,11 +88,11 @@ class Main extends Mod {
 		context.onKeyDown(function(key) {
 			switch (key) {
 				case F7:
-					pinned = watched != null && !pinned;
-				case F8:
 					panel.visible = !panel.visible;
-				case F9:
+				case F8:
 					frozen = !frozen;
+				case F9:
+					pinned = watched != null && !pinned;
 				case F10:
 					write();
 				default:
@@ -159,7 +159,7 @@ class Main extends Mod {
 		if (actor != null && frames++ % READ_EVERY == 0)
 			read(actor);
 
-		var lines = ["INSPECTOR   F7 pin, F8 hide, F9 freeze, F10 write", "", "States:"];
+		var lines = ["INSPECTOR   F7 hide, F8 freeze, F9 pin, F10 write", "", "States:"];
 		for (machine in sorted(states.keys()))
 			lines.push("  " + machine + ": " + states.get(machine));
 		lines.push("  actors: " + actorStateChanges + " changes");
