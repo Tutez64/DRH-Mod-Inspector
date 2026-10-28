@@ -2,10 +2,10 @@
   "id": "inspector",
   "name": "Inspector",
   "description": "Shows the game's raw values as it runs: the last monster or prop hovered, game states, objects and server messages.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Tutez",
   "api": "1.0",
-  "drh": "14",
+  "drh": "14-15",
   "entry": "Main",
   "uses": ["extends"]
 }
