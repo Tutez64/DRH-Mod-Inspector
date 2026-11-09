@@ -159,7 +159,7 @@ class Main extends Mod {
 		if (actor != null && frames++ % READ_EVERY == 0)
 			read(actor);
 
-		var lines = ["INSPECTOR   F7 hide, F8 freeze, F9 pin, F10 write", "", "States:"];
+		var lines:Array<String> = ["INSPECTOR   F7 hide, F8 freeze, F9 pin, F10 write", "", "States:"];
 		for (machine in sorted(states.keys()))
 			lines.push("  " + machine + ": " + states.get(machine));
 		lines.push("  actors: " + actorStateChanges + " changes");
@@ -215,9 +215,9 @@ class Main extends Mod {
 	 * then its public ones, then its internal ones (`mName`, the game's private storage), each by name.
 	 */
 	function read(actor:ActorGameObject):Void {
-		var changed = [];
-		var open = [];
-		var internal = [];
+		var changed:Array<String> = [];
+		var open:Array<String> = [];
+		var internal:Array<String> = [];
 		var baseline = baselines.get(actor);
 		var first = baseline == null;
 		if (first) {
@@ -293,7 +293,7 @@ class Main extends Mod {
 	}
 
 	static function sorted(keys:Iterator<String>):Array<String> {
-		var keys = [for (key in keys) key];
+		var keys:Array<String> = [for (key in keys) key];
 		keys.sort(function(a, b) return a < b ? -1 : a > b ? 1 : 0);
 		return keys;
 	}
