@@ -4,7 +4,7 @@
   "description": "Shows the game's raw values as it runs: the last monster or prop hovered, game states, objects and server messages.",
   "version": "0.1.2",
   "author": "Tutez",
-  "api": "1.0",
+  "api": "1.3",
   "drh": "16-17",
   "entry": "Main",
   "uses": ["extends"]

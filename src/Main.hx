@@ -8,6 +8,7 @@ import brain.stateMachine.State;
 import brain.stateMachine.StateMachine;
 import mods.api.Context;
 import mods.api.Mod;
+import mods.api.settings.KeyAction;
 import openfl.events.Event;
 
 /**
@@ -17,12 +18,12 @@ import openfl.events.Event;
  * reads by reflection. The last actor hovered stays watched until another is, and F9 pins it. Every
  * actor has the same fields, monster or prop, so the panel shows first those that changed since it was
  * first watched, then its public ones; F10 writes it to the mod's `data` folder with every field. F7
- * shows or hides the panel, F8 freezes it.
+ * shows or hides the panel, F5 freezes it. The player may pick other keys.
  */
 class Main extends Mod {
-	static inline final F7 = 118;
+	static inline final F5 = 116;
 
-	static inline final F8 = 119;
+	static inline final F7 = 118;
 
 	static inline final F9 = 120;
 
@@ -79,27 +80,30 @@ class Main extends Mod {
 
 	var listening:Bool = false;
 
+	var hideKey:KeyAction;
+
+	var freezeKey:KeyAction;
+
+	var pinKey:KeyAction;
+
+	var writeKey:KeyAction;
+
 	override public function init(context:Context):Void {
 		this.context = context;
 		panel = new Panel();
 		context.overlay.addChild(panel);
 		// Redrawn on the panel's own frames: they stop with the overlay layer if the mod fails.
 		panel.addEventListener(Event.ENTER_FRAME, refresh);
-		context.onKeyDown(function(key) {
-			switch (key) {
-				case F7:
-					panel.visible = !panel.visible;
-				case F8:
-					frozen = !frozen;
-				case F9:
-					pinned = watched != null && !pinned;
-				case F10:
-					write();
-				default:
-					return false;
-			}
-			return true;
-		});
+		var keys = context.keys;
+		hideKey = keys.action("panel", "Show or hide", "Shows or hides the panel.", F7);
+		hideKey.onPress(function() panel.visible = !panel.visible);
+		// The game binds no action to F8, the key this had first.
+		freezeKey = keys.action("freeze", "Freeze", "Stops the panel from changing.", F5);
+		freezeKey.onPress(function() frozen = !frozen);
+		pinKey = keys.action("pin", "Pin", "Keeps the monster or prop it shows.", F9);
+		pinKey.onPress(function() pinned = watched != null && !pinned);
+		writeKey = keys.action("write", "Write to a file", "Saves what it shows to a file.", F10);
+		writeKey.onPress(write);
 		var core = context.core;
 		core.onObjectReady(function(object) {
 			count(objects, nameOf(object), 1);
@@ -152,6 +156,15 @@ class Main extends Mod {
 		frames = 0;
 	}
 
+	/** Each action after the key it has now; one with no key is left out. */
+	function keysLine():String {
+		var parts:Array<String> = [];
+		for (pair in [[hideKey.label, "hide"], [freezeKey.label, "freeze"], [pinKey.label, "pin"], [writeKey.label, "write"]])
+			if (pair[0] != "")
+				parts.push(pair[0] + " " + pair[1]);
+		return parts.join(", ");
+	}
+
 	function refresh(_):Void {
 		if (!panel.visible || frozen || !context.core.alive)
 			return;
@@ -159,7 +172,7 @@ class Main extends Mod {
 		if (actor != null && frames++ % READ_EVERY == 0)
 			read(actor);
 
-		var lines:Array<String> = ["INSPECTOR   F7 hide, F8 freeze, F9 pin, F10 write", "", "States:"];
+		var lines:Array<String> = ["INSPECTOR   " + keysLine(), "", "States:"];
 		for (machine in sorted(states.keys()))
 			lines.push("  " + machine + ": " + states.get(machine));
 		lines.push("  actors: " + actorStateChanges + " changes");

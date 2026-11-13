@@ -5,7 +5,7 @@ A mod for [Dungeon Rampage Haxe](https://github.com/Tutez64/Dungeon-Rampage-Haxe
 <!-- drh:show -->
 Shows the game's raw values as it runs: those of the last monster or prop under the cursor, the game's states, its objects and what the server sends. Technical and unpolished, for the curious and for modders.
 
-F7 shows or hides the panel, F8 freezes it, F9 pins the monster or prop it shows, F10 saves it to a file in the mod's data folder.
+F7 shows or hides the panel, F5 freezes it, F9 pins the monster or prop it shows, F10 saves it to a file in the mod's data folder. The keys can be changed in the game's settings, under CONTROLS.
 <!-- /drh:show -->
 
 ## How it works
