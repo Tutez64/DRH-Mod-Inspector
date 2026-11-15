@@ -35,8 +35,11 @@ class Main extends Mod {
 	/** At most how many of the watched actor's fields the panel shows; a written snapshot has them all. */
 	static inline final SHOWN_FIELDS = 16;
 
-	/** Frames between two readings of the watched actor's fields, which call its getters. */
-	static inline final READ_EVERY = 15;
+	/** Seconds between two redraws of the panel, which only happen when something it shows changed. */
+	static inline final DRAW_EVERY = 0.2;
+
+	/** Redraws between two readings of the watched actor's fields, which call its getters. */
+	static inline final READ_EVERY = 2;
 
 	var context:Context;
 
@@ -71,7 +74,17 @@ class Main extends Mod {
 	/** Each actor's field values when it was first watched, to tell those that changed since. */
 	var baselines:haxe.ds.ObjectMap<ActorGameObject, Map<String, String>> = new haxe.ds.ObjectMap();
 
-	var frames:Int = 0;
+	/** When the panel may be redrawn next, in `haxe.Timer.stamp` seconds. */
+	var nextDraw:Float = 0;
+
+	/** Redraws since the watched actor's fields were last read. */
+	var sinceRead:Int = 0;
+
+	/** Whether something the panel shows changed since it was drawn. */
+	var stale:Bool = true;
+
+	/** The fields to read of each class met, with whether each is a property, by the class's name. */
+	var readables:Map<String, Array<{name:String, property:Bool}>> = new Map();
 
 	var frozen:Bool = false;
 
@@ -96,18 +109,28 @@ class Main extends Mod {
 		panel.addEventListener(Event.ENTER_FRAME, refresh);
 		var keys = context.keys;
 		hideKey = keys.action("panel", "Show or hide", "Shows or hides the panel.", F7);
-		hideKey.onPress(function() panel.visible = !panel.visible);
+		hideKey.onPress(function() {
+			panel.visible = !panel.visible;
+			drawNow();
+		});
 		// The game binds no action to F8, the key this had first.
 		freezeKey = keys.action("freeze", "Freeze", "Stops the panel from changing.", F5);
-		freezeKey.onPress(function() frozen = !frozen);
+		freezeKey.onPress(function() {
+			frozen = !frozen;
+			drawNow();
+		});
 		pinKey = keys.action("pin", "Pin", "Keeps the monster or prop it shows.", F9);
-		pinKey.onPress(function() pinned = watched != null && !pinned);
+		pinKey.onPress(function() {
+			pinned = watched != null && !pinned;
+			drawNow();
+		});
 		writeKey = keys.action("write", "Write to a file", "Saves what it shows to a file.", F10);
 		writeKey.onPress(write);
 		var core = context.core;
 		core.onObjectReady(function(object) {
 			count(objects, nameOf(object), 1);
 			remember(arrivals, "+ " + label(object));
+			stale = true;
 		});
 		core.onObjectGone(function(object) {
 			count(objects, nameOf(object), -1);
@@ -117,11 +140,13 @@ class Main extends Mod {
 				pinned = false;
 			}
 			baselines.remove(cast object);
+			stale = true;
 		});
 		core.onFieldReceived(function(object, field, name) {
 			var key = name != "" ? name : nameOf(object) + " field " + field;
 			count(fields, key, 1);
 			remember(recentFields, key);
+			stale = true;
 		});
 		core.onStateEnter(stateEntered);
 	}
@@ -145,6 +170,13 @@ class Main extends Mod {
 			actorStateChanges++;
 		else
 			states.set(nameOf(machine), state.name);
+		stale = true;
+	}
+
+	/** Has the panel redrawn on its next frame: a key was pressed. */
+	function drawNow():Void {
+		stale = true;
+		nextDraw = 0;
 	}
 
 	function hover(event:DBMouseEvent):Void {
@@ -153,7 +185,8 @@ class Main extends Mod {
 		watched = event.actor;
 		watchedFields = [];
 		watchedShown = 0;
-		frames = 0;
+		sinceRead = READ_EVERY;
+		stale = true;
 	}
 
 	/** Each action after the key it has now; one with no key is left out. */
@@ -165,12 +198,28 @@ class Main extends Mod {
 		return parts.join(", ");
 	}
 
+	/**
+	 * Called on every frame, and does nothing on most: the panel is redrawn a few times a second, and
+	 * only when something it shows changed, so that it costs the game little while it is shown.
+	 */
 	function refresh(_):Void {
-		if (!panel.visible || frozen || !context.core.alive)
+		if (frozen || !panel.visible)
 			return;
-		var actor = watched != null && !watched.isDestroyed ? watched : null;
-		if (actor != null && frames++ % READ_EVERY == 0)
+		var now = haxe.Timer.stamp();
+		if (now < nextDraw)
+			return;
+		nextDraw = now + DRAW_EVERY;
+		if (!context.core.alive)
+			return;
+		var actor:Null<ActorGameObject> = watched != null && !watched.isDestroyed ? watched : null;
+		if (actor != null && ++sinceRead >= READ_EVERY) {
+			sinceRead = 0;
 			read(actor);
+			stale = true;
+		}
+		if (!stale)
+			return;
+		stale = false;
 
 		var lines:Array<String> = ["INSPECTOR   " + keysLine(), "", "States:"];
 		for (machine in sorted(states.keys()))
@@ -262,21 +311,41 @@ class Main extends Mod {
 	 * The object's fields and properties with their values, by name. A property is read through its
 	 * getter; a getter that throws is left out.
 	 */
-	static function readable(object:Dynamic):Array<{name:String, value:String}> {
-		var names = Type.getInstanceFields(Type.getClass(object));
-		var fields = [];
-		for (name in sorted(names.iterator())) {
-			var property = StringTools.startsWith(name, "get_") ? name.substr(4) : null;
-			// A property's storage is shown through its getter.
-			if (property == null && names.indexOf("get_" + name) >= 0)
-				continue;
+	function readable(object:Dynamic):Array<{name:String, value:String}> {
+		var type = Type.getClass(object);
+		var key = Type.getClassName(type);
+		var known:Null<Array<{name:String, property:Bool}>> = readables.get(key);
+		if (known == null) {
+			known = named(type);
+			readables.set(key, known);
+		}
+		var fields:Array<{name:String, value:String}> = [];
+		for (i in 0...known.length) {
+			var field:{name:String, property:Bool} = known[i];
 			try {
-				var value:Dynamic = property != null ? Reflect.getProperty(object, property) : Reflect.field(object, name);
+				var value:Dynamic = field.property ? Reflect.getProperty(object, field.name) : Reflect.field(object, field.name);
 				if (!Reflect.isFunction(value))
-					fields.push({name: property != null ? property : name, value: describe(value)});
+					fields.push({name: field.name, value: describe(value)});
 			} catch (_:Dynamic) {}
 		}
 		return fields;
+	}
+
+	/** The fields to read of a class, sorted, worked out once: its instances all have the same. */
+	static function named(type:Class<Dynamic>):Array<{name:String, property:Bool}> {
+		var names = Type.getInstanceFields(type);
+		var has:Map<String, Bool> = new Map();
+		for (name in names)
+			has.set(name, true);
+		var out:Array<{name:String, property:Bool}> = [];
+		for (name in sorted(names.iterator())) {
+			var property = StringTools.startsWith(name, "get_") ? name.substr(4) : null;
+			// A property's storage is shown through its getter.
+			if (property == null && has.exists("get_" + name))
+				continue;
+			out.push({name: property != null ? property : name, property: property != null});
+		}
+		return out;
 	}
 
 	static function describe(value:Dynamic):String {

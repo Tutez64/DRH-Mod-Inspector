@@ -10,6 +10,9 @@ class Panel extends Sprite {
 
 	var text:TextField;
 
+	/** The text's height when the background was last drawn. */
+	var textHeight:Float = -1;
+
 	public function new() {
 		super();
 		mouseEnabled = false;
@@ -27,11 +30,16 @@ class Panel extends Sprite {
 
 	public function show(lines:Array<String>, viewWidth:Float):Void {
 		text.text = lines.join("\n");
-		text.height = text.textHeight + 6;
-		graphics.clear();
-		graphics.beginFill(0x000000, 0.7);
-		graphics.drawRect(0, 0, WIDTH, text.height + 8);
-		graphics.endFill();
+		var height:Float = text.textHeight + 6;
+		// The background is drawn again only when the text takes another height.
+		if (height != textHeight) {
+			textHeight = height;
+			text.height = height;
+			graphics.clear();
+			graphics.beginFill(0x000000, 0.7);
+			graphics.drawRect(0, 0, WIDTH, height + 8);
+			graphics.endFill();
+		}
 		x = Math.round(viewWidth - WIDTH - 8);
 		y = 8;
 	}
